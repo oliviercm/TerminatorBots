@@ -1942,7 +1942,7 @@ enum AI_AIM_TYPE {
 			Left4Timers.AddTimer(null, 0.2, ::Left4Bots.ExtraMedkitBotHeal.bindenv(::Left4Bots), { bot = self });
 		}
 	}
-	else if (self.GetHealth() < 40 || (Left4Bots.Bots.len() >= Left4Bots.Survivors.len() && self.GetHealth() < 80 && (Left4Bots.BaseModeName == "coop" || Left4Bots.BaseModeName == "versus" || Left4Bots.BaseModeName == "realism")))
+	else if (Left4Bots.Settings.heal_auto_use_extra_medkits_enabled && (self.GetHealth() < 40 || (Left4Bots.Bots.len() >= Left4Bots.Survivors.len() && self.GetHealth() < 80 && (Left4Bots.BaseModeName == "coop" || Left4Bots.BaseModeName == "versus" || Left4Bots.BaseModeName == "realism"))))
 	{
 		local availableMedkits = 0;
 		local requiredMedkits = 1;

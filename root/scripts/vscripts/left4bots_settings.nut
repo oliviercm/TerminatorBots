@@ -203,6 +203,9 @@
 	// Radius for searching the spare medkits around
 	heal_spare_medkits_radius = 500
 
+	// Bots use extra first aid kits if low health
+	heal_auto_use_extra_medkits_enabled = 1
+
 	// Chance that the bot will throw the pipe bomb/bile jar at the horde (this check runs multiple times in a second, so this chance must be pretty low to have an actual chance of no throw)
 	horde_nades_chance = 100
 
@@ -586,7 +589,7 @@
 	team_max_chainsaws = 0
 
 	// Bots will try to keep this maximum number of melee weapons in the entire survivor team, regardless their weapon preference
-	team_max_melee = 0
+	team_max_melee = 4
 
 	// Bots will try to keep this minimum number of defibrillators in the entire survivor team, regardless their weapon preference
 	team_min_defibs = 1
