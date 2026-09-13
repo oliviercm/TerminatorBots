@@ -3,7 +3,7 @@
 //     Workshop:	https://steamcommunity.com/sharedfiles/filedetails/?id=3022416274
 //--------------------------------------------------------------------------------------------------
 
-Msg("Including left4bots_takeover (takeover v4b-diag)...\n");
+Msg("Including left4bots_takeover...\n");
 
 // Schedules the automatic bot takeover for the given (just died) human player after 'auto_takeover_delay' seconds
 ::Left4Bots.ScheduleAutoTakeover <- function (player, userid)
@@ -42,18 +42,6 @@ Msg("Including left4bots_takeover (takeover v4b-diag)...\n");
 	client.SetContext("who", TakeoverChars[char].context, -1);
 }
 
-// Re-applies the taken-over character: the respawn triggered by ReviveByDefib re-asserts the player's original
-// character state, so the swap's character change must be re-applied until the respawn has settled
-::Left4Bots.TakeoverCharacterFix <- function (params)
-{
-	local player = params.player;
-	if (!player || !player.IsValid())
-		return;
-
-	ApplySurvivorCharacter(player, params.char);
-	Logger.Info("TakeoverCharacterFix - re-applied char " + params.char);
-}
-
 // One-shot timer callback scheduled by ScheduleAutoTakeover: makes the player take over a random living survivor bot if the player is still dead
 ::Left4Bots.OnAutoTakeover <- function (params)
 {
@@ -87,24 +75,20 @@ Msg("Including left4bots_takeover (takeover v4b-diag)...\n");
 		// Characters before the swap: the player takes over the bot's character, the bot (which becomes the corpse) wears the player's
 		local playerChar = NetProps.GetPropInt(player, "m_survivorCharacter");
 		local botChar = NetProps.GetPropInt(bot, "m_survivorCharacter");
-		Logger.Info("OnAutoTakeover step: characters read (player=" + playerChar + ", bot=" + botChar + ")");
 
 		// A dead L4D2 survivor cannot be revived by swapping entity properties: the engine still tracks the player as dead
 		// (survival rules + survivor_death_model) and re-kills them within a second, and a dead client can't pick up weapons.
 		// The engine's own defib path handles all of it: it consumes the death model, restores the client and updates its internal state.
 		player.ReviveByDefib();
-		Logger.Info("OnAutoTakeover step: player defibbed/revived");
 
 		// Both clients are living survivors now: swap their states.
 		// The player gets the bot's body (position, weapons, ammo, health) and the bot inherits the player's original state
 		// (death position, character, weapons, ammo)
 		SimpleTakeover(player, bot);
-		Logger.Info("OnAutoTakeover step: state swap done");
 
-		// Update the visual character of both clients (the swap's SetCharacter call does not change the model)
+		// Apply the full visual character to both clients (model + property + context)
 		ApplySurvivorCharacter(player, botChar);
 		ApplySurvivorCharacter(bot, playerChar);
-		Logger.Info("OnAutoTakeover step: characters applied");
 
 		// Finish the takeover: the bot must end up as the dead player. Restore FL_FAKECLIENT (the swap strips it from the flags
 		// it assigns) so the death handler recognizes the bot as one and does the full cleanup, then kill it in place -
@@ -115,13 +99,6 @@ Msg("Including left4bots_takeover (takeover v4b-diag)...\n");
 		bot.TakeDamage(botHealth, 0, null);
 		if (NetProps.GetPropInt(bot, "m_iHealth") > 0) // A single hit can be damage-capped
 			bot.TakeDamage(NetProps.GetPropInt(bot, "m_iHealth"), 0, Entities.FindByClassname(null, "worldspawn"));
-		Logger.Info("OnAutoTakeover step: bot finished, health now " + NetProps.GetPropInt(bot, "m_iHealth"));
-
-		// The defib respawn can re-assert the player's original character for a second or two; re-apply the bot's character
-		// until the respawn has settled
-		local delays = [0.1, 0.5, 1.0, 1.5];
-		foreach (_, delay in delays)
-			Left4Timers.AddTimer(null, delay, @(p) ::Left4Bots.TakeoverCharacterFix.bindenv(::Left4Bots)(p), { player = player, char = botChar });
 	}
 	catch (e)
 	{
@@ -308,8 +285,6 @@ Msg("Including left4bots_takeover (takeover v4b-diag)...\n");
 		NetProps.GetPropInt(main, "cslocaldata.m_duckUntilOnGround"),
 	];
 
-	Logger.Info("SimpleTakeover step: state captured");
-
 	local mainAmmo = {};
 	local targetAmmo = {};
 	for (local i = 0; i < NetProps.GetPropArraySize(main, "m_iAmmo"); i++)
@@ -386,8 +361,6 @@ Msg("Including left4bots_takeover (takeover v4b-diag)...\n");
 		target.DropItem(valClass);
 		DoEntFire("!self", "Use", "", 0, main, val);
 	}
-
-	Logger.Info("SimpleTakeover step: inventory transferred");
 
 	for (local i = 0; i <= 1; i++)
 	{
@@ -476,6 +449,4 @@ Msg("Including left4bots_takeover (takeover v4b-diag)...\n");
 
 		DoEntFire("!self", "CancelCurrentScene", "", 0, null, client);
 	}
-
-	Logger.Info("SimpleTakeover step: state applied");
 }
