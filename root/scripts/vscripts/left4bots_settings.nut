@@ -3,6 +3,12 @@
 	// [1/0] 1 = Prevents (at least will try) the infamous bug of the pipe bomb thrown right before transitioning to the next chapter, the bots will bug out and do nothing for the entire next chapter
 	anti_pipebomb_bug = 1
 
+	// [1/0] 1 = When a human player dies, after 'auto_takeover_delay' seconds they automatically take over a random living survivor bot (the two swap state: the player becomes the bot and the bot becomes the player's corpse at the death location)
+	auto_takeover = 1
+
+	// Delay in seconds between a human player's death and the automatic bot takeover (used only if auto_takeover = 1). The takeover is aborted if the player is defibbed within this window or if no living survivor bot is available
+	auto_takeover_delay = 5
+
 	// [1/0] Enable/Disable the automation
 	automation = 1
 

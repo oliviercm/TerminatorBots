@@ -217,6 +217,11 @@ Msg("Including left4bots_events...\n");
 
 				Left4Bots.RemoveBotThink(victim);
 			}
+			else if (Left4Bots.Settings.auto_takeover)
+			{
+				// A human player just died: after a short delay they will automatically take over a random living survivor bot
+				Left4Bots.ScheduleAutoTakeover(victim, victimUserId);
+			}
 
 			Left4Bots.PrintSurvivorsCount();
 

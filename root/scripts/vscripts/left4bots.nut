@@ -4184,6 +4184,7 @@ Support vanilla weapon preference.
 
 IncludeScript("left4bots_defaults");
 IncludeScript("left4bots_ai");
+IncludeScript("left4bots_takeover");
 IncludeScript("left4bots_events");
 IncludeScript("left4bots_commands");
 IncludeScript("left4bots_automation");
