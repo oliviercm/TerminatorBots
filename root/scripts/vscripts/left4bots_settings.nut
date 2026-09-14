@@ -7,7 +7,7 @@
 	auto_takeover = 1
 
 	// Delay in seconds between a human player's death and the automatic bot takeover (used only if auto_takeover = 1). The takeover is aborted if the player is defibbed within this window or if no living survivor bot is available
-	auto_takeover_delay = 5
+	auto_takeover_delay = 0
 
 	// [1/0] Enable/Disable the automation
 	automation = 1
