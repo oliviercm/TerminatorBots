@@ -81,24 +81,21 @@ Msg("Including left4bots_takeover...\n");
 		// The engine's own defib path handles all of it: it consumes the death model, restores the client and updates its internal state.
 		player.ReviveByDefib();
 
+		// Apply the full visual character to both clients (model + property + context)
+		ApplySurvivorCharacter(player, botChar);
+		ApplySurvivorCharacter(bot, playerChar);
+
 		// Both clients are living survivors now: swap their states.
 		// The player gets the bot's body (position, weapons, ammo, health) and the bot inherits the player's original state
 		// (death position, character, weapons, ammo)
 		SimpleTakeover(player, bot);
-
-		// Apply the full visual character to both clients (model + property + context)
-		ApplySurvivorCharacter(player, botChar);
-		ApplySurvivorCharacter(bot, playerChar);
 
 		// Finish the takeover: the bot must end up as the dead player. Restore FL_FAKECLIENT (the swap strips it from the flags
 		// it assigns) so the death handler recognizes the bot as one and does the full cleanup, then kill it in place -
 		// the game spawns its survivor_death_model (wearing the player's character) at the death location
 		NetProps.SetPropInt(bot, "m_fFlags", NetProps.GetPropInt(bot, "m_fFlags") | (1 << 8)); // FL_FAKECLIENT
 
-		local botHealth = NetProps.GetPropInt(bot, "m_iHealth");
-		bot.TakeDamage(botHealth, 0, null);
-		if (NetProps.GetPropInt(bot, "m_iHealth") > 0) // A single hit can be damage-capped
-			bot.TakeDamage(NetProps.GetPropInt(bot, "m_iHealth"), 0, Entities.FindByClassname(null, "worldspawn"));
+		Left4Utils.KillPlayer(bot);
 	}
 	catch (e)
 	{
