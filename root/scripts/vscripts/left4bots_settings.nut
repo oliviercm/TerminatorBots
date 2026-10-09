@@ -594,6 +594,10 @@
 	// Bots will try to keep this minimum number of defibrillators in the entire survivor team, regardless their weapon preference
 	team_min_defibs = 1
 
+	// Bots will try to keep this minimum number of magnums in the entire survivor team, regardless their weapon preference
+	// NOTE: This also means that this amount of bots will prefer keeping their magnum instead of taking another secondary weapon
+	team_min_magnums = 0
+
 	// Bots will try to keep this minimum number of medkits in the entire survivor team, regardless their weapon preference
 	team_min_medkits = 0
 
@@ -603,9 +607,17 @@
 	// Bots will try to keep this minimum number of pipe bombs in the entire survivor team, regardless their weapon preference
 	team_min_pipebombs = 1
 
+	// Bots will try to keep this minimum number of assault rifles in the entire survivor team, regardless their weapon preference
+	// NOTE: This also means that this amount of bots will prefer keeping their tier1 rifles instead of taking tier2 guns if no tier2 rifle is found
+	team_min_rifles = 0
+
 	// Bots will try to keep this minimum number of shotguns in the entire survivor team, regardless their weapon preference
 	// NOTE: This also means that this amount of bots will prefer keeping their tier1 shotguns instead of taking tier2 guns if no tier2 shotgun is found
 	team_min_shotguns = 0
+
+	// Bots will try to keep this minimum number of sniper rifles in the entire survivor team, regardless their weapon preference
+	// NOTE: This also means that this amount of bots will prefer keeping their tier1 snipers instead of taking tier2 guns if no tier2 sniper is found
+	team_min_snipers = 0
 
 	// Bots will try to keep this minimum number of bile jars in the entire survivor team, regardless their weapon preference
 	team_min_vomitjars = 1

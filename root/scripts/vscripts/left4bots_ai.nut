@@ -2413,6 +2413,10 @@ enum AI_AIM_TYPE {
 	local currWeps = [Left4Utils.WeaponId.none, Left4Utils.WeaponId.none, Left4Utils.WeaponId.none, Left4Utils.WeaponId.none, Left4Utils.WeaponId.none]; // Will be filled with the weapon ids of the bot's current weapons
 	local hasT1Shotgun = false;
 	local hasT2Shotgun = false;
+	local hasT1Sniper = false;
+	local hasT2Sniper = false;
+	local hasT1Rifle = false;
+	local hasT2Rifle = false;
 	local hasT3Weapon = false; // https://github.com/smilz0/Left4Bots/issues/70
 	local priAmmoPercent = 100;
 	local hasAmmoUpgrade = true;
@@ -2420,6 +2424,7 @@ enum AI_AIM_TYPE {
 	local hasChainsaw = false;
 	local hasPistol = false;
 	local hasDualPistol = false;
+	local hasMagnum = false;
 	local hasMelee = false;
 	local hasMolotov = false;
 	local hasPipeBomb = false;
@@ -2453,6 +2458,10 @@ enum AI_AIM_TYPE {
 				case 0:
 					hasT1Shotgun = (currWeps[i] == Left4Utils.WeaponId.weapon_shotgun_chrome) || (currWeps[i] == Left4Utils.WeaponId.weapon_pumpshotgun);
 					hasT2Shotgun = (currWeps[i] == Left4Utils.WeaponId.weapon_autoshotgun) || (currWeps[i] == Left4Utils.WeaponId.weapon_shotgun_spas);
+					hasT1Sniper = currWeps[i] == Left4Utils.WeaponId.weapon_hunting_rifle;
+					hasT2Sniper = (currWeps[i] == Left4Utils.WeaponId.weapon_sniper_military) || (currWeps[i] == Left4Utils.WeaponId.weapon_sniper_scout) || (currWeps[i] == Left4Utils.WeaponId.weapon_sniper_awp);
+					hasT1Rifle = currWeps[i] == Left4Utils.WeaponId.weapon_rifle;
+					hasT2Rifle = (currWeps[i] == Left4Utils.WeaponId.weapon_rifle_desert) || (currWeps[i] == Left4Utils.WeaponId.weapon_rifle_ak47) || (currWeps[i] == Left4Utils.WeaponId.weapon_rifle_sg552);
 					hasT3Weapon = (currWeps[i] == Left4Utils.WeaponId.weapon_grenade_launcher) || (currWeps[i] == Left4Utils.WeaponId.weapon_rifle_m60);
 					priAmmoPercent = Left4Utils.GetAmmoPercent(inv[slot]);
 					hasAmmoUpgrade = NetProps.GetPropInt(inv[slot], "m_nUpgradedPrimaryAmmoLoaded") >= L4B.Settings.pickups_wep_upgraded_ammo;
@@ -2466,6 +2475,7 @@ enum AI_AIM_TYPE {
 					if (hasPistol)
 						//hasDualPistol = NetProps.GetPropInt(inv[slot], "m_hasDualWeapons") > 0; // ???? This doesn't work sometimes
 						hasDualPistol = NetProps.GetPropInt(inv[slot], "m_isDualWielding") > 0;
+					hasMagnum = currWeps[i] == Left4Utils.WeaponId.weapon_pistol_magnum;
 					hasMelee = currWeps[i] > Left4Utils.MeleeWeaponId.none;
 
 					break;
@@ -2502,19 +2512,40 @@ enum AI_AIM_TYPE {
 			if (useWeapon != 0)
 				WeaponsToSearch[useWeapon] <- 0; // Always add the "use" weapon, if any
 
-			if (L4B.TeamShotguns <= L4B.Settings.team_min_shotguns && (hasT1Shotgun || hasT2Shotgun))
-			{
-				// We have a shotgun but TeamShotguns <= team_min_shotguns so we need to make sure to keep it. Just upgrade it if needed
+			// If our current primary weapon is one of the categories the team must keep (shotgun/sniper/rifle), we must keep it
+			local keepPrimary = false;
+			if (hasT1Shotgun || hasT2Shotgun)
+				keepPrimary = L4B.TeamShotguns <= L4B.Settings.team_min_shotguns;
+			else if (hasT1Sniper || hasT2Sniper)
+				keepPrimary = L4B.TeamSnipers <= L4B.Settings.team_min_snipers;
+			else if (hasT1Rifle || hasT2Rifle)
+				keepPrimary = L4B.TeamRifles <= L4B.Settings.team_min_rifles;
 
-				if (!hasT2Shotgun)
+			if (keepPrimary)
+			{
+				// We have a shotgun/sniper/rifle but its team count is <= its team_min_* setting, so we need to make sure to keep it. Just upgrade it if needed
+
+				if (hasT1Shotgun)
 				{
 					WeaponsToSearch[Left4Utils.WeaponId.weapon_autoshotgun] <- 0;
 					WeaponsToSearch[Left4Utils.WeaponId.weapon_shotgun_spas] <- 0;
 				}
+				else if (hasT1Sniper)
+				{
+					WeaponsToSearch[Left4Utils.WeaponId.weapon_sniper_military] <- 0;
+					WeaponsToSearch[Left4Utils.WeaponId.weapon_sniper_scout] <- 0;
+					WeaponsToSearch[Left4Utils.WeaponId.weapon_sniper_awp] <- 0;
+				}
+				else if (hasT1Rifle)
+				{
+					WeaponsToSearch[Left4Utils.WeaponId.weapon_rifle_desert] <- 0;
+					WeaponsToSearch[Left4Utils.WeaponId.weapon_rifle_ak47] <- 0;
+					WeaponsToSearch[Left4Utils.WeaponId.weapon_rifle_sg552] <- 0;
+				}
 			}
 			else
 			{
-				// We either don't have a shotgun or TeamShotguns > team_min_shotguns so we can follow our preference and try to get an higher priority weapon
+				// We either don't have a shotgun/sniper/rifle or its team count is > its team_min_* setting, so we can follow our preference and try to get an higher priority weapon
 
 				local stop = false; // If find weapon in the current Tier, stop add weapons.
 				foreach (Tier, list in WeapPref[slotIdx])
@@ -2567,6 +2598,23 @@ enum AI_AIM_TYPE {
 					WeaponsToSearch[Left4Utils.WeaponId.weapon_pumpshotgun] <- 0;
 					WeaponsToSearch[Left4Utils.WeaponId.weapon_shotgun_chrome] <- 0;
 				}
+
+				// Same for snipers and rifles
+				if (L4B.TeamSnipers < L4B.Settings.team_min_snipers)
+				{
+					WeaponsToSearch[Left4Utils.WeaponId.weapon_hunting_rifle] <- 0;
+					WeaponsToSearch[Left4Utils.WeaponId.weapon_sniper_military] <- 0;
+					WeaponsToSearch[Left4Utils.WeaponId.weapon_sniper_scout] <- 0;
+					WeaponsToSearch[Left4Utils.WeaponId.weapon_sniper_awp] <- 0;
+				}
+
+				if (L4B.TeamRifles < L4B.Settings.team_min_rifles)
+				{
+					WeaponsToSearch[Left4Utils.WeaponId.weapon_rifle] <- 0;
+					WeaponsToSearch[Left4Utils.WeaponId.weapon_rifle_desert] <- 0;
+					WeaponsToSearch[Left4Utils.WeaponId.weapon_rifle_ak47] <- 0;
+					WeaponsToSearch[Left4Utils.WeaponId.weapon_rifle_sg552] <- 0;
+				}
 			}
 		}
 
@@ -2600,70 +2648,83 @@ enum AI_AIM_TYPE {
 			if (useWeapon != 0)
 				WeaponsToSearch[useWeapon] <- 0; // Always add the "use" weapon, if any
 
-			local stop = false; // If find weapon in the current Tier, stop add weapons.
-			foreach (Tier, list in WeapPref[slotIdx])
+			if (hasMagnum && L4B.TeamMagnums <= L4B.Settings.team_min_magnums)
 			{
-				if (list.len() < 2) // The list must contain at least two items: [noPref, weapon...]
-					continue;
+				// We have a magnum but TeamMagnums <= team_min_magnums so we need to make sure to keep it (there is no tier2 magnum to upgrade to)
+			}
+			else
+			{
+				// We either don't have a magnum or TeamMagnums > team_min_magnums so we can follow our preference and try to get an higher priority weapon
 
-				for (local x = 1; x < list.len(); x++)
+				local stop = false; // If find weapon in the current Tier, stop add weapons.
+				foreach (Tier, list in WeapPref[slotIdx])
 				{
-					local prefId = list[x];
-					if (hasChainsaw && L4B.TeamChainsaws > L4B.Settings.team_max_chainsaws)
+					if (list.len() < 2) // The list must contain at least two items: [noPref, weapon...]
+						continue;
+
+					for (local x = 1; x < list.len(); x++)
 					{
-						// Try to get rid of chainsaw by replacing with anything else
-						if (prefId != Left4Utils.WeaponId.weapon_chainsaw)
+						local prefId = list[x];
+						if (hasChainsaw && L4B.TeamChainsaws > L4B.Settings.team_max_chainsaws)
 						{
-							if (prefId > Left4Utils.MeleeWeaponId.none && L4B.TeamMelee >= L4B.Settings.team_max_melee)
+							// Try to get rid of chainsaw by replacing with anything else
+							if (prefId != Left4Utils.WeaponId.weapon_chainsaw)
 							{
-								// But always take care of the team_max_chainsaws / team_max_melee limits
+								if (prefId > Left4Utils.MeleeWeaponId.none && L4B.TeamMelee >= L4B.Settings.team_max_melee)
+								{
+									// But always take care of the team_max_chainsaws / team_max_melee limits
+								}
+								else
+									WeaponsToSearch[prefId] <- 0;
 							}
-							else
-								WeaponsToSearch[prefId] <- 0;
 						}
-					}
-					else if (hasMelee && L4B.TeamMelee > L4B.Settings.team_max_melee)
-					{
-						// Try to get rid of melee by replacing with any non melee secondary
-						if (prefId < Left4Utils.MeleeWeaponId.none)
+						else if (hasMelee && L4B.TeamMelee > L4B.Settings.team_max_melee)
 						{
-							if (prefId == Left4Utils.WeaponId.weapon_chainsaw && L4B.TeamChainsaws >= L4B.Settings.team_max_chainsaws)
+							// Try to get rid of melee by replacing with any non melee secondary
+							if (prefId < Left4Utils.MeleeWeaponId.none)
 							{
-								// But always take care of the team_max_chainsaws / team_max_melee limits
+								if (prefId == Left4Utils.WeaponId.weapon_chainsaw && L4B.TeamChainsaws >= L4B.Settings.team_max_chainsaws)
+								{
+									// But always take care of the team_max_chainsaws / team_max_melee limits
+								}
+								else
+									WeaponsToSearch[prefId] <- 0;
 							}
-							else
-								WeaponsToSearch[prefId] <- 0;
-						}
-					}
-					else
-					{
-						// If noPref and slot is currently empty, add all the weapons. Order doesn't matter
-						// If !noPref add all the preference weapons that have higher priority than the one we have in the inventory
-						if (list[0] ? currWeps[slotIdx] == Left4Utils.WeaponId.none || list.find(currWeps[slotIdx]) == null : prefId != currWeps[slotIdx])
-						{
-							if ((prefId == Left4Utils.WeaponId.weapon_chainsaw && L4B.TeamChainsaws >= L4B.Settings.team_max_chainsaws) || (prefId > Left4Utils.MeleeWeaponId.none && L4B.TeamMelee >= L4B.Settings.team_max_melee && !hasMelee))
-							{
-								// Take care of the team_max_chainsaws / team_max_melee limits
-							}
-							else if (currWeps[0] == Left4Utils.WeaponId.none && prefId > Left4Utils.MeleeWeaponId.none && !L4B.Settings.pickups_melee_noprimary)
-							{
-								// Don't pickup melee weapons if we don't have a primary weapon and pickups_melee_noprimary is 0
-							}
-							else
-								WeaponsToSearch[prefId] <- 0;
 						}
 						else
 						{
-							stop = true;
-							break;
+							// If noPref and slot is currently empty, add all the weapons. Order doesn't matter
+							// If !noPref add all the preference weapons that have higher priority than the one we have in the inventory
+							if (list[0] ? currWeps[slotIdx] == Left4Utils.WeaponId.none || list.find(currWeps[slotIdx]) == null : prefId != currWeps[slotIdx])
+							{
+								if ((prefId == Left4Utils.WeaponId.weapon_chainsaw && L4B.TeamChainsaws >= L4B.Settings.team_max_chainsaws) || (prefId > Left4Utils.MeleeWeaponId.none && L4B.TeamMelee >= L4B.Settings.team_max_melee && !hasMelee))
+								{
+									// Take care of the team_max_chainsaws / team_max_melee limits
+								}
+								else if (currWeps[0] == Left4Utils.WeaponId.none && prefId > Left4Utils.MeleeWeaponId.none && !L4B.Settings.pickups_melee_noprimary)
+								{
+									// Don't pickup melee weapons if we don't have a primary weapon and pickups_melee_noprimary is 0
+								}
+								else
+									WeaponsToSearch[prefId] <- 0;
+							}
+							else
+							{
+								stop = true;
+								break;
+							}
 						}
+					}
+
+					if (stop)
+					{
+						break;
 					}
 				}
 
-				if (stop)
-				{
-					break;
-				}
+				// But if TeamMagnums < team_min_magnums we must also make sure to try to get a magnum as we currently don't have one
+				if (L4B.TeamMagnums < L4B.Settings.team_min_magnums)
+					WeaponsToSearch[Left4Utils.WeaponId.weapon_pistol_magnum] <- 0;
 			}
 		}
 
