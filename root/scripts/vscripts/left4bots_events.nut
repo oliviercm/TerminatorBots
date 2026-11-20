@@ -1888,17 +1888,26 @@ Msg("Including left4bots_events...\n");
 	//Logger.Debug("OnInventoryManager - TeamMolotovs: " + TeamMolotovs + " - TeamPipeBombs: " + TeamPipeBombs + " - TeamVomitJars: " + TeamVomitJars);
 	//Logger.Debug("OnInventoryManager - TeamMedkits: " + TeamMedkits + " - TeamDefibs: " + TeamDefibs);
 
-	// Then decide what we need
+	// Then decide what we need.
+	// "deficits" is how many weapons of each category the team is still missing: BotUpdatePickupToSearch hands
+	// every missing weapon to a single bot (decrementing the counter) so that they don't all chase the same one
+	local deficits = {
+		shotguns = Settings.team_min_shotguns > TeamShotguns ? Settings.team_min_shotguns - TeamShotguns : 0,
+		snipers = Settings.team_min_snipers > TeamSnipers ? Settings.team_min_snipers - TeamSnipers : 0,
+		rifles = Settings.team_min_rifles > TeamRifles ? Settings.team_min_rifles - TeamRifles : 0,
+		magnums = Settings.team_min_magnums > TeamMagnums ? Settings.team_min_magnums - TeamMagnums : 0,
+	};
+
 	foreach (bot in Bots)
 	{
 		if (bot.IsValid())
-			bot.GetScriptScope().BotUpdatePickupToSearch();
+			bot.GetScriptScope().BotUpdatePickupToSearch(deficits);
 	}
 
 	foreach (bot in L4D1Survivors)
 	{
 		if (bot.IsValid())
-			bot.GetScriptScope().BotUpdatePickupToSearch();
+			bot.GetScriptScope().BotUpdatePickupToSearch(deficits);
 	}
 }
 

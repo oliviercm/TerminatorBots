@@ -2538,6 +2538,11 @@ enum AI_AIM_TYPE {
 			if (useWeapon != 0)
 				WeaponsToSearch[useWeapon] <- 0; // Always add the "use" weapon, if any
 
+			// "needsAmmo" = our primary is below pickups_wep_ammo_replenish (or we have no primary at all).
+			// Getting a working weapon matters more than keeping the team composition balanced, so such a bot
+			// ignores the team_min_* checks below and goes after any primary category
+			local needsAmmo = currWeps[slotIdx] == Left4Utils.WeaponId.none || priAmmoPercent < L4B.Settings.pickups_wep_ammo_replenish;
+
 			// If our current primary weapon is one of the categories the team must keep (shotgun/sniper/rifle), we must keep it
 			local keepPrimary = false;
 			if (hasT1Shotgun || hasT2Shotgun)
@@ -2547,11 +2552,9 @@ enum AI_AIM_TYPE {
 			else if (hasT1Rifle || hasT2Rifle)
 				keepPrimary = L4B.TeamRifles <= L4B.Settings.team_min_rifles;
 
-			// Replacing a weapon that is running out of ammo matters more than keeping the team composition
-			// balanced: when our primary is low on ammo we go back to following our preferences (and the
-			// categories the team is missing). BotGetNearestPickupWithin only accepts the swap if the weapon
-			// on the ground holds more ammo than the one we'd drop, so we never swap for something worse
-			if (keepPrimary && priAmmoPercent < L4B.Settings.pickups_wep_ammo_replenish)
+			// A weapon that is running out of ammo is not worth keeping just because the team composition
+			// requires that category, so we go back to following our preferences and any category we may find
+			if (keepPrimary && needsAmmo)
 				keepPrimary = false;
 
 			if (keepPrimary)
@@ -2623,9 +2626,21 @@ enum AI_AIM_TYPE {
 					}
 				}
 
+				// If we need ammo (see needsAmmo above) we go after every primary category, even the ones the team has
+				// enough of: an empty-handed bot is worse than a slightly unbalanced composition. BotGetNearestPickupWithin
+				// only accepts the swap if the weapon on the ground holds more ammo than the one we'd drop, so we still
+				// never trade our primary for a worse one
+				if (needsAmmo)
+				{
+					foreach (weaponId, category in Left4Bots.WeaponCategories)
+						WeaponsToSearch[weaponId] <- 0;
+				}
+
 				// But if the team is missing shotguns we must also make sure to try to get one as we currently don't have one.
 				// The deficit is assigned to a single bot at a time (deficits.shotguns is decremented) or every bot would go after
 				// the same weapon, overshoot team_min_shotguns and then try to get rid of the "surplus", swapping weapons forever
+				// (a bot that's after every category for its own ammo needs still consumes the deficit: it's a bot that will
+				// indeed pick up a shotgun if it finds one)
 				if (deficits.shotguns > 0)
 				{
 					WeaponsToSearch[Left4Utils.WeaponId.weapon_autoshotgun] <- 0;
