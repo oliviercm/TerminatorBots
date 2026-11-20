@@ -83,6 +83,7 @@ enum AI_AIM_TYPE {
 	scope.UpgradesToSearch <- {};
 	scope.TimePickup <- 0;
 	scope.LastPickup <- 0;
+	scope.DroppedPrimaries <- {}; // Entity indexes -> Time() of the primary weapons we left on the ground by picking up another primary
 	scope.CurrentOrder <- null;
 	scope.Orders <- [];
 	scope.ThrowType <- AI_THROW_TYPE.None;
@@ -202,6 +203,7 @@ enum AI_AIM_TYPE {
 	scope.UpgradesToSearch <- {};
 	scope.TimePickup <- 0;
 	scope.LastPickup <- 0;
+	scope.DroppedPrimaries <- {}; // Entity indexes -> Time() of the primary weapons we left on the ground by picking up another primary
 	scope.ThrowType <- AI_THROW_TYPE.None;
 	scope.ThrowTarget <- null;
 	scope.ThrowStartedOn <- 0;
@@ -634,6 +636,7 @@ enum AI_AIM_TYPE {
 		}
 		ret += "\n- Num. WeaponsToSearch: " + scope.WeaponsToSearch.len() + "\n";
 		ret += "- Num. UpgradesToSearch: " + scope.UpgradesToSearch.len() + "\n";
+		ret += "- Num. DroppedPrimaries (ignored for pickups till swap cooldown): " + scope.DroppedPrimaries.len() + "\n";
 	}
 	else
 	{
@@ -689,6 +692,7 @@ enum AI_AIM_TYPE {
 		}
 		ret += "\n- Num. WeaponsToSearch: " + scope.WeaponsToSearch.len() + "\n";
 		ret += "- Num. UpgradesToSearch: " + scope.UpgradesToSearch.len() + "\n";
+		ret += "- Num. DroppedPrimaries (ignored for pickups till swap cooldown): " + scope.DroppedPrimaries.len() + "\n";
 
 		// TODO: print buttons disabled/forced, movetype etc.
 	}
@@ -1351,6 +1355,25 @@ enum AI_AIM_TYPE {
 
 		// After this item, wait till WeaponsToSearch gets updated before picking up anything else
 		WeaponsToSearch.clear();
+
+		// If we are picking up a primary weapon, the one we have in that slot is going to end up on the ground right at our
+		// feet. Take note of it so that we don't pick it (or any other one we dropped before) right back up, see BotGetNearestPickupWithin
+		if (Left4Utils.GetWeaponSlotById(Left4Utils.GetWeaponId(pickup)) == 0)
+		{
+			local priWeapon = Left4Utils.GetInventoryItemInSlot(self, INV_SLOT_PRIMARY);
+			if (priWeapon != null && priWeapon.IsValid())
+				DroppedPrimaries[priWeapon.GetEntityIndex()] <- CurTime;
+		}
+
+		// Forget the ones that are old enough to be picked up again (also frees the entity indexes, which can be reused)
+		local expired = [];
+		foreach (entIndex, dropTime in DroppedPrimaries)
+		{
+			if (CurTime - dropTime >= L4B.Settings.pickups_wep_swap_cooldown)
+				expired.append(entIndex);
+		}
+		foreach (entIndex in expired)
+			delete DroppedPrimaries[entIndex];
 
 		TimePickup = CurTime;
 
@@ -2405,7 +2428,10 @@ enum AI_AIM_TYPE {
 }
 
 // Updates the bot's pickups search lists (WeaponsToSearch and UpgradesToSearch)
-::Left4Bots.AIFuncs.BotUpdatePickupToSearch <- function ()
+// "deficits" holds how many weapons of each category (shotguns/snipers/rifles/magnums) the team is still missing,
+// as decided by OnInventoryManager. Every time a bot is told to go get one of them the corresponding counter is
+// decremented, so that only as many bots as needed go after each missing weapon
+::Left4Bots.AIFuncs.BotUpdatePickupToSearch <- function (deficits)
 {
 	WeaponsToSearch.clear();
 	UpgradesToSearch.clear();
@@ -2521,6 +2547,13 @@ enum AI_AIM_TYPE {
 			else if (hasT1Rifle || hasT2Rifle)
 				keepPrimary = L4B.TeamRifles <= L4B.Settings.team_min_rifles;
 
+			// Replacing a weapon that is running out of ammo matters more than keeping the team composition
+			// balanced: when our primary is low on ammo we go back to following our preferences (and the
+			// categories the team is missing). BotGetNearestPickupWithin only accepts the swap if the weapon
+			// on the ground holds more ammo than the one we'd drop, so we never swap for something worse
+			if (keepPrimary && priAmmoPercent < L4B.Settings.pickups_wep_ammo_replenish)
+				keepPrimary = false;
+
 			if (keepPrimary)
 			{
 				// We have a shotgun/sniper/rifle but its team count is <= its team_min_* setting, so we need to make sure to keep it. Just upgrade it if needed
@@ -2590,30 +2623,35 @@ enum AI_AIM_TYPE {
 					}
 				}
 
-				// But if TeamShotguns < team_min_shotguns we must also make sure to try to get a shotgun as we currently don't have one
-				if (L4B.TeamShotguns < L4B.Settings.team_min_shotguns)
+				// But if the team is missing shotguns we must also make sure to try to get one as we currently don't have one.
+				// The deficit is assigned to a single bot at a time (deficits.shotguns is decremented) or every bot would go after
+				// the same weapon, overshoot team_min_shotguns and then try to get rid of the "surplus", swapping weapons forever
+				if (deficits.shotguns > 0)
 				{
 					WeaponsToSearch[Left4Utils.WeaponId.weapon_autoshotgun] <- 0;
 					WeaponsToSearch[Left4Utils.WeaponId.weapon_shotgun_spas] <- 0;
 					WeaponsToSearch[Left4Utils.WeaponId.weapon_pumpshotgun] <- 0;
 					WeaponsToSearch[Left4Utils.WeaponId.weapon_shotgun_chrome] <- 0;
+					deficits.shotguns -= 1;
 				}
 
 				// Same for snipers and rifles
-				if (L4B.TeamSnipers < L4B.Settings.team_min_snipers)
+				if (deficits.snipers > 0)
 				{
 					WeaponsToSearch[Left4Utils.WeaponId.weapon_hunting_rifle] <- 0;
 					WeaponsToSearch[Left4Utils.WeaponId.weapon_sniper_military] <- 0;
 					WeaponsToSearch[Left4Utils.WeaponId.weapon_sniper_scout] <- 0;
 					WeaponsToSearch[Left4Utils.WeaponId.weapon_sniper_awp] <- 0;
+					deficits.snipers -= 1;
 				}
 
-				if (L4B.TeamRifles < L4B.Settings.team_min_rifles)
+				if (deficits.rifles > 0)
 				{
 					WeaponsToSearch[Left4Utils.WeaponId.weapon_rifle] <- 0;
 					WeaponsToSearch[Left4Utils.WeaponId.weapon_rifle_desert] <- 0;
 					WeaponsToSearch[Left4Utils.WeaponId.weapon_rifle_ak47] <- 0;
 					WeaponsToSearch[Left4Utils.WeaponId.weapon_rifle_sg552] <- 0;
+					deficits.rifles -= 1;
 				}
 			}
 		}
@@ -2722,9 +2760,13 @@ enum AI_AIM_TYPE {
 					}
 				}
 
-				// But if TeamMagnums < team_min_magnums we must also make sure to try to get a magnum as we currently don't have one
-				if (L4B.TeamMagnums < L4B.Settings.team_min_magnums)
+				// But if the team is missing magnums we must also make sure to try to get one as we currently don't have one
+				// (the deficit is assigned to one bot at a time, like the primary weapon categories above)
+				if (deficits.magnums > 0)
+				{
 					WeaponsToSearch[Left4Utils.WeaponId.weapon_pistol_magnum] <- 0;
+					deficits.magnums -= 1;
+				}
 			}
 		}
 
@@ -3159,20 +3201,36 @@ enum AI_AIM_TYPE {
 						{
 							// Primary
 
-							// If we are going to pick-up the same weapon, make sure it has more ammo than the current one
+							// Never pick back up a primary weapon we left on the ground ourselves: the closest weapon around is
+							// always one of the ones we just dropped and picking it back up is what made the bots swap the same
+							// weapons forever
+							if (entIndex in DroppedPrimaries)
+								continue;
+
 							local ammoPercent = Left4Utils.GetAmmoPercent(ent);
+
+							// A primary weapon on the ground that is low on ammo (< pickups_wep_ammo_replenish) is not worth
+							// picking up even when it belongs to a category the team is missing: it would be dropped again a
+							// few seconds later. Take it only if it holds more ammo than the weapon we have in hand (or if we
+							// have no primary at all) or if its ammo is good enough (>= pickups_wep_ammo_replenish and
+							// >= pickups_wep_min_ammo). Same weapon/category swaps always need more ammo, so a bot can never
+							// trade its primary for a worse one and thus can't swap the same weapons back and forth forever
+							local moreAmmo = ammoPercent > priAmmoPercent;
+							local enoughAmmo = ammoPercent >= L4B.Settings.pickups_wep_ammo_replenish && ammoPercent >= L4B.Settings.pickups_wep_min_ammo;
+							local ammoOk = priWeaponId == Left4Utils.WeaponId.none || moreAmmo || enoughAmmo;
+
 							if (weaponId in Left4Bots.WeaponCategories && priWeaponId in Left4Bots.WeaponCategories)
 							{
 								local weaponCategory = Left4Bots.WeaponCategories[weaponId];
 								local priWeaponCategory = Left4Bots.WeaponCategories[priWeaponId];
-								if ((weaponCategory != priWeaponCategory && ammoPercent >= L4B.Settings.pickups_wep_min_ammo) || (weaponCategory == priWeaponCategory && ammoPercent > priAmmoPercent))
+								if (ammoOk && (weaponCategory != priWeaponCategory || moreAmmo))
 								{
 									// Any other
 									ret = ent;
 									minDist = dist;
 								}
 							}
-							else if ((weaponId != priWeaponId && ammoPercent >= L4B.Settings.pickups_wep_min_ammo) || (weaponId == priWeaponId && ammoPercent > priAmmoPercent))
+							else if (ammoOk && (weaponId != priWeaponId || moreAmmo))
 							{
 								// Any other
 								ret = ent;

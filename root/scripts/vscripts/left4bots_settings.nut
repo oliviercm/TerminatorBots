@@ -420,6 +420,11 @@
 	// If the ammo percent of the bot's current primary weapon drops below this value, the bot will consider replacing the weapon with any other weapon
 	pickups_wep_replace_ammo = 1.0
 
+	// When a bot replaces its primary weapon, the one it dropped stays on the ground right at its feet.
+	// A bot will ignore the primary weapons it dropped itself as pick-ups until this many seconds have
+	// passed, or it would keep swapping the same weapons back and forth forever
+	pickups_wep_swap_cooldown = 10.0
+
 	// Minumum number of upgraded (incendiary/explosive) ammo loaded for ignoring deployed upgrades
 	// Basically the bot will consider using another deployed ammo upgrade pack only when the number of upgraded ammo in his weapon is below this number
 	pickups_wep_upgraded_ammo = 1
