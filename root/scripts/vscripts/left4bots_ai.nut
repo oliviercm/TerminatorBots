@@ -2012,13 +2012,21 @@ enum AI_AIM_TYPE {
 	//lxc lock func
 	BotLockShoot();
 
-	if (self.IsOnThirdStrike() && Left4Utils.HasMedkit(self) && !NetProps.GetPropInt(self, "m_hasVisibleThreats") && !Left4Bots.HasAngryCommonsWithin(Origin, 1, 400, 100) && !Left4Bots.SurvivorsHeldOrIncapped() && !Left4Bots.HasVisibleSpecialInfectedWithin(self, Origin, 400) && !Left4Bots.HasTanksWithin(Origin, 800) && !Left4Bots.HasWitchesWithin(Origin, 300, 100) && (GetCurrentFlowPercentForPlayer(self) < 90 || (Left4Bots.IsSurvivorInCheckpoint(self) && Left4Bots.Settings.new_chapter_min_health == 0)))
+	// Paused == 0 or the vanilla AI would be moving the bot while we force the medkit on it (weapon switch fight)
+	if (Paused == 0 && self.IsOnThirdStrike() && Left4Utils.HasMedkit(self) && !NetProps.GetPropInt(self, "m_hasVisibleThreats") && !Left4Bots.HasAngryCommonsWithin(Origin, 1, 400, 100) && !Left4Bots.SurvivorsHeldOrIncapped() && !Left4Bots.HasVisibleSpecialInfectedWithin(self, Origin, 400) && !Left4Bots.HasTanksWithin(Origin, 800) && !Left4Bots.HasWitchesWithin(Origin, 300, 100) && (GetCurrentFlowPercentForPlayer(self) < 90 || (Left4Bots.IsSurvivorInCheckpoint(self) && Left4Bots.Settings.new_chapter_min_health == 0)))
 	{
+		// The first aid kit is the only real healing for a black and white bot, so it takes priority over
+		// temporary health: cancel pills/adrenaline orders that would take the medkit's place
+		BotCancelAutoOrders("tempheal");
+
 		local holding = self.GetActiveWeapon();
 		local holdingKit = holding && holding.IsValid() && holding.GetClassname() == "weapon_first_aid_kit";
 		if (!holdingKit)
 		{
+			// The vanilla AI might be holding pills/adrenaline (or a gun) instead: switch back to the kit and
+			// deploy it as soon as the switch is done instead of waiting for the next Misc think cycle
 			self.SwitchToItem("weapon_first_aid_kit");
+			Left4Timers.AddTimer(null, 0.6, ::Left4Bots.ExtraMedkitBotHeal.bindenv(::Left4Bots), { bot = self });
 		}
 		else
 		{

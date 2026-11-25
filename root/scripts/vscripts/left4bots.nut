@@ -609,11 +609,15 @@ IncludeScript("left4bots_settings");
 // - true: if should start the pause for any other reason
 ::Left4Bots.BotShouldStartPause <- function (bot, userid, orig, isstuck, isHealOrder = false, isLeadOrder = false, maxSeparation = 0)
 {
-	if (isstuck || bot.IsIT() || (isLeadOrder && Settings.lead_pause_behind_dist && !IsBotAheadOfHumans(userid, Settings.lead_pause_behind_dist)) || CheckSeparation_Orders(userid, maxSeparation) || BotWillUseMeds(bot) || SurvivorsHeldOrIncapped())
+	// A black and white bot has to deploy its medkit by itself: the vanilla AI would use pills/adrenaline
+	// instead, so the two AIs would fight over the weapon (kit -> pills -> kit) until the bot gets stuck
+	local medkitFirst = BotShouldUseMedkitFirst(bot);
+
+	if (isstuck || bot.IsIT() || (isLeadOrder && Settings.lead_pause_behind_dist && !IsBotAheadOfHumans(userid, Settings.lead_pause_behind_dist)) || CheckSeparation_Orders(userid, maxSeparation) || (!medkitFirst && BotWillUseMeds(bot)) || SurvivorsHeldOrIncapped())
 		return true;
 
 	local tmp;
-	if (!isHealOrder)
+	if (!isHealOrder && !medkitFirst)
 	{
 		tmp = bot.GetActiveWeapon();
 		if (tmp && tmp.GetClassname() == "weapon_first_aid_kit")
@@ -642,10 +646,19 @@ IncludeScript("left4bots_settings");
 ::Left4Bots.BotShouldStopPause <- function (bot, userid, orig, isstuck, isHealOrder = false, isLeadOrder = false, maxSeparation = 0)
 {
 	local aw = bot.GetActiveWeapon();
+	// Black and white bots take control back from the vanilla AI in order to deploy their medkit (see BotShouldStartPause)
+	local medkitFirst = BotShouldUseMedkitFirst(bot);
 	if (maxSeparation)
-		return !isstuck && !bot.IsIT() && (!isLeadOrder || Settings.lead_pause_behind_dist == 0 || IsBotAheadOfHumans(userid, Settings.lead_pause_behind_dist)) && (isHealOrder || !aw || aw.GetClassname() != "weapon_first_aid_kit") && !bot.IsInCombat() && !CheckSeparation_Orders(userid, maxSeparation) && !HasTanksWithin(orig, 800) && !BotWillUseMeds(bot) && !HasVisibleSpecialInfectedWithin(bot, orig, 400) && !HasWitchesWithin(orig, 300, 100) && !SurvivorsHeldOrIncapped();
+		return !isstuck && !bot.IsIT() && (!isLeadOrder || Settings.lead_pause_behind_dist == 0 || IsBotAheadOfHumans(userid, Settings.lead_pause_behind_dist)) && (isHealOrder || medkitFirst || !aw || aw.GetClassname() != "weapon_first_aid_kit") && !bot.IsInCombat() && !CheckSeparation_Orders(userid, maxSeparation) && !HasTanksWithin(orig, 800) && (medkitFirst || !BotWillUseMeds(bot)) && !HasVisibleSpecialInfectedWithin(bot, orig, 400) && !HasWitchesWithin(orig, 300, 100) && !SurvivorsHeldOrIncapped();
 	else
-		return !isstuck && !bot.IsIT() && (!isLeadOrder || Settings.lead_pause_behind_dist == 0 || IsBotAheadOfHumans(userid, Settings.lead_pause_behind_dist)) && (isHealOrder || !aw || aw.GetClassname() != "weapon_first_aid_kit") && !bot.IsInCombat() && !HasTanksWithin(orig, 800) && !BotWillUseMeds(bot) && !HasVisibleSpecialInfectedWithin(bot, orig, 400) && !HasWitchesWithin(orig, 300, 100) && !SurvivorsHeldOrIncapped();
+		return !isstuck && !bot.IsIT() && (!isLeadOrder || Settings.lead_pause_behind_dist == 0 || IsBotAheadOfHumans(userid, Settings.lead_pause_behind_dist)) && (isHealOrder || medkitFirst || !aw || aw.GetClassname() != "weapon_first_aid_kit") && !bot.IsInCombat() && !HasTanksWithin(orig, 800) && (medkitFirst || !BotWillUseMeds(bot)) && !HasVisibleSpecialInfectedWithin(bot, orig, 400) && !HasWitchesWithin(orig, 300, 100) && !SurvivorsHeldOrIncapped();
+}
+
+// Should the bot's AI use its first aid kit before anything else (pills/adrenaline included)?
+// A black and white survivor (3 incapacitations) dies on the next one, so it needs real healing
+::Left4Bots.BotShouldUseMedkitFirst <- function (bot)
+{
+	return bot != null && bot.IsValid() && bot.IsOnThirdStrike() && Left4Utils.HasMedkit(bot);
 }
 
 // Will the vanilla AI use meds?
@@ -4120,10 +4133,20 @@ Support vanilla weapon preference.
 
 ::Left4Bots.ExtraMedkitBotHeal <- function (params)
 {
-	Left4Bots.PlayerPressButton(params.bot, BUTTON_ATTACK, 0, null, 0, 0, true);
+	local bot = params.bot;
+	if (!bot || !bot.IsValid())
+		return;
+
+	// Only ever deploy a first aid kit: the bot might be holding something else by now (the vanilla AI
+	// loves switching to pills/adrenaline to heal) and pressing the attack button would use that instead
+	local holding = bot.GetActiveWeapon();
+	if (!holding || !holding.IsValid() || holding.GetClassname() != "weapon_first_aid_kit")
+		return;
+
+	Left4Bots.PlayerPressButton(bot, BUTTON_ATTACK, 0, null, 0, 0, true);
 	if (params.medkit)
 	{
-		local scope = params.bot.GetScriptScope();
+		local scope = bot.GetScriptScope();
 		scope.ForcePickup = params.medkit;
 	}
 }
