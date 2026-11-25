@@ -89,6 +89,8 @@ enum AI_AIM_TYPE {
 	scope.ThrowType <- AI_THROW_TYPE.None;
 	scope.ThrowTarget <- null;
 	scope.ThrowStartedOn <- 0;
+	scope.PickupMoveEnt <- null; // The item we are currently trying to pick up
+	scope.PickupMoveTime <- 0; // Time() of when we started trying to pick up PickupMoveEnt (the attempt is tracked per item)
 	scope.DoorEnt <- null; // Used for AI_MOVE_TYPE.Door
 	scope.DoorZ <- 0; // Used for AI_MOVE_TYPE.Door
 	scope.DoorAct <- AI_DOOR_ACTION.None; // Used for AI_MOVE_TYPE.Door
@@ -207,6 +209,8 @@ enum AI_AIM_TYPE {
 	scope.ThrowType <- AI_THROW_TYPE.None;
 	scope.ThrowTarget <- null;
 	scope.ThrowStartedOn <- 0;
+	scope.PickupMoveEnt <- null; // The item we are currently trying to pick up
+	scope.PickupMoveTime <- 0; // Time() of when we started trying to pick up PickupMoveEnt (the attempt is tracked per item)
 	scope.Waiting <- false;
 	scope.HurryUntil <- 0;
 	scope.UseWeapons <- {};
@@ -625,6 +629,8 @@ enum AI_AIM_TYPE {
 		ret += "- ThrowType: AI_THROW_TYPE." + Left4Utils.TableKeyFromValue(getconsttable()["AI_THROW_TYPE"], scope.ThrowType) + "\n";
 		ret += "- ThrowTarget: " + scope.ThrowTarget + "\n";
 		ret += "- ThrowStartedOn: " + scope.ThrowStartedOn + "\n";
+		ret += "- PickupMoveEnt: " + scope.PickupMoveEnt + "\n";
+		ret += "- PickupMoveTime (pick-up attempt started on): " + scope.PickupMoveTime + "\n";
 		ret += "- HurryUntil: " + scope.HurryUntil + "\n";
 		ret += "- Paused: " + scope.Paused + "\n";
 		ret += "\n- Num. WeapPref (" + scope.WeapPref.len() + "): ";
@@ -663,6 +669,8 @@ enum AI_AIM_TYPE {
 		ret += "- ThrowType: AI_THROW_TYPE." + Left4Utils.TableKeyFromValue(getconsttable()["AI_THROW_TYPE"], scope.ThrowType) + "\n";
 		ret += "- ThrowTarget: " + scope.ThrowTarget + "\n";
 		ret += "- ThrowStartedOn: " + scope.ThrowStartedOn + "\n";
+		ret += "- PickupMoveEnt: " + scope.PickupMoveEnt + "\n";
+		ret += "- PickupMoveTime (pick-up attempt started on): " + scope.PickupMoveTime + "\n";
 		ret += "- DoorEnt: " + scope.DoorEnt + "\n";
 		ret += "- DoorZ: " + scope.DoorZ + "\n";
 		ret += "- DoorAct: AI_DOOR_ACTION." + Left4Utils.TableKeyFromValue(getconsttable()["AI_DOOR_ACTION"], scope.DoorAct) + "\n";
@@ -1347,11 +1355,39 @@ enum AI_AIM_TYPE {
 		return;
 	}
 
-	// Is the item close enough?
-	if ((self.GetCenter() - pickup.GetCenter()).Length() <= L4B.Settings.pickups_pick_range || L4B.CanUseTo(self, pickup, false)) // There is a cvar (player_use_radius 96) but idk how the distance is calculated, seems not to be from the player's origin or center
+	// How long we've been chasing this item. The clock only runs while the bot is actually moving for it
+	// (pick-up MOVE with this exact item as destination), so an item the bot never went after is never
+	// force-picked up. It is tracked per item: the same item picked as a target again keeps its own clock
+	local pickupAttempt = 0;
+	if (MoveType == pickupMovetype && MoveEnt == pickup)
 	{
-		// Yes, pick it up
-		L4B.Logger.Debug("[AI]" + self.GetPlayerName() + " - Picking up: " + pickup);
+		if (!PickupMoveEnt || !PickupMoveEnt.IsValid() || PickupMoveEnt != pickup)
+		{
+			PickupMoveEnt = pickup;
+			PickupMoveTime = CurTime;
+		}
+
+		pickupAttempt = CurTime - PickupMoveTime;
+	}
+	else
+	{
+		// Not chasing this item anymore (the MOVE was cancelled or it's for another item): start over
+		PickupMoveEnt = null;
+		PickupMoveTime = 0;
+	}
+
+	// We are committed to the item until the pick-up attempt is over: the soft give-up conditions below
+	// (team separation, item behind us) don't drop the MOVE while we are committed, they only stop us from
+	// starting a new attempt. At the end of the attempt the item is either ours (pickupFailsafe) or we drop it
+	local pickupCommitted = L4B.Settings.pickups_failsafe_delay > 0 && pickupAttempt < L4B.Settings.pickups_failsafe_delay && MoveType == pickupMovetype && MoveEnt == pickup;
+
+	local pickupFailsafe = L4B.Settings.pickups_failsafe_delay > 0 && pickupAttempt >= L4B.Settings.pickups_failsafe_delay && L4B.CanTraceToPickup(self, pickup);
+
+	// Is the item close enough? (or have we been trying to get it for too long? pickups_failsafe_delay)
+	if (pickupFailsafe || (self.GetCenter() - pickup.GetCenter()).Length() <= L4B.Settings.pickups_pick_range || L4B.CanUseTo(self, pickup, false)) // There is a cvar (player_use_radius 96) but idk how the distance is calculated, seems not to be from the player's origin or center
+	{
+		// Yes, pick it up. With the failsafe, PickupFailsafe fires USE on the item directly so the distance doesn't matter
+		L4B.Logger.Debug("[AI]" + self.GetPlayerName() + " - Picking up: " + pickup + (pickupFailsafe ? " (failsafe, after " + pickupAttempt.tointeger() + "s)" : ""));
 
 		// After this item, wait till WeaponsToSearch gets updated before picking up anything else
 		WeaponsToSearch.clear();
@@ -1376,6 +1412,8 @@ enum AI_AIM_TYPE {
 			delete DroppedPrimaries[entIndex];
 
 		TimePickup = CurTime;
+		PickupMoveEnt = null;
+		PickupMoveTime = 0;
 
 		L4B.PickupFailsafe(self, pickup);
 		L4B.PlayerPressButton(self, BUTTON_USE, 0.0, pickup, 0, 0, true);
@@ -1402,13 +1440,29 @@ enum AI_AIM_TYPE {
 	if (MoveType > pickupMovetype)
 		return; // Do not move for the item if there is an ongoing MOVE with higher priority
 
-	// Don't move for the item if finale escape started, there are teammates who need help or we are too far from the human survivors
+	// Don't move for the item if finale escape started or there are teammates who need help
 	// if (BotIsInPause()) // TODO: Should we?
-	if (L4B.EscapeStarted || L4B.SurvivorsHeldOrIncapped() || L4B.CheckSeparation_Pickup(UserId) || L4B.BotShouldStartPause(self, UserId, Origin, SM_IsStuck, false, false, 0))
+	if (L4B.EscapeStarted || L4B.SurvivorsHeldOrIncapped() || L4B.BotShouldStartPause(self, UserId, Origin, SM_IsStuck, false, false, 0))
 	{
 		if (MoveType == pickupMovetype)
 		{
-			L4B.Logger.Debug("[AI]" + self.GetPlayerName() + " - Teammates need help or too far: resetting MOVE");
+			L4B.Logger.Debug("[AI]" + self.GetPlayerName() + " - Teammates need help: resetting MOVE");
+
+			// Reset if we were moving for this item
+			BotMoveReset();
+		}
+		return;
+	}
+
+	// We only give up an item because we are too far from the other survivors once our pick-up attempt is
+	// over. While it's still going we commit to the item: going back for it moves the bot away from the team,
+	// so dropping the pick-up here would just make the bot advance along the flow, spot the item again, go
+	// back for it, fall behind again... forever
+	if (!pickupCommitted && L4B.CheckSeparation_Pickup(UserId))
+	{
+		if (MoveType == pickupMovetype)
+		{
+			L4B.Logger.Debug("[AI]" + self.GetPlayerName() + " - Too far from the team: resetting MOVE");
 
 			// Reset if we were moving for this item
 			BotMoveReset();
@@ -1439,7 +1493,9 @@ enum AI_AIM_TYPE {
 
 	local flowDistance = GetFlowDistanceForPosition(pickup.GetOrigin()) - GetFlowDistanceForPosition(self.GetOrigin());
 
-	if (flowDistance < 0) {
+	// Same as the separation check above: an ongoing pick-up attempt is not dropped because the item is
+	// behind us, the attempt ends via the failsafe pick-up (if the item is visible) or when it expires
+	if (flowDistance < 0 && !pickupCommitted) {
 		if ((allBots && !L4B.CanTraceToPickup(self, pickup)) || flowDistance < (-300)) {
 			if (MoveType == pickupMovetype)
 			{
@@ -1472,11 +1528,15 @@ enum AI_AIM_TYPE {
 	}
 	else
 	{
-		// Already moving for the item (MoveEnt), keep moving
+		// Already moving for the item (MoveEnt), keep moving.
+		// force = true: the destination didn't change so BotMoveTo/Nav would skip the command, but the
+		// bot's own AI wants it to follow the flow. If we don't refresh the MOVE command at every pick-up
+		// think (before sb_debug_apoproach_wait_time expires) the bot takes one step back for the item,
+		// then walks forward again and never gets to it
 		if (L4B.Settings.moveto_nav)
-			BotMoveToNav(MoveEnt.GetOrigin());
+			BotMoveToNav(MoveEnt.GetOrigin(), true);
 		else
-			BotMoveTo(MoveEnt.GetOrigin());
+			BotMoveTo(MoveEnt.GetOrigin(), true);
 	}
 }
 
