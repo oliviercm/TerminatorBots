@@ -1,0 +1,2 @@
+- Live testing with a running L4D2 instance is infeasible; delegate live testing to the user.
+- Do not generate updated VPKs after code changes; the user will do this by themselves.
