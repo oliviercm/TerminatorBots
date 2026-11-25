@@ -393,7 +393,7 @@
 	// the flow (that made the bots oscillate between the item and the flow forever). When the attempt ends, if the bot
 	// still doesn't have the item but can see it, the item is forced into its inventory via USE input
 	// Set to 0 to disable both the commitment and the failsafe pick-up (the bots will give up on items behind them)
-	pickups_failsafe_delay = 5
+	pickups_failsafe_delay = 2
 
 	// Only move for a pick-up if there is at least one human survivor within this range (0 = no limit)
 	pickups_max_separation = 0
