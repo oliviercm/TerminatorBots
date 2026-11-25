@@ -2508,9 +2508,15 @@ Support vanilla weapon preference.
 }
 
 // Is the entity a valid pick up?
-::Left4Bots.IsValidPickup <- function (ent)
+// ignoreSkipUse = true also accepts an item another bot just claimed via PickupFailsafe (the "skip_use" context
+// only lasts 0.2 s). That claim must not cancel a pick-up a bot is already committed to, otherwise every forced
+// pick-up makes the other bots drop their item and pick another one, over and over
+::Left4Bots.IsValidPickup <- function (ent, ignoreSkipUse = false)
 {
-	if (!ent || !ent.IsValid() || ent.GetContext("skip_use")) //lxc filter if someone about pick
+	if (!ent || !ent.IsValid())
+		return false;
+
+	if (!ignoreSkipUse && ent.GetContext("skip_use")) //lxc filter if someone about pick
 		return false;
 
 	if (ent.GetClassname().find("_spawn") != null)

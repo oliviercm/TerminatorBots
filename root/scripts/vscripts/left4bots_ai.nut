@@ -92,6 +92,8 @@ enum AI_AIM_TYPE {
 	scope.PickupMoveEnt <- null; // The item we are currently trying to pick up
 	scope.PickupMoveTime <- 0; // Time() of when we started trying to pick up PickupMoveEnt (the attempt is tracked per item)
 	scope.PickupSkip <- {}; // Entity indexes -> Time() until when an item must be ignored as a pick-up (we gave up on it)
+	scope.PickupMoveDist <- -1; // Distance from the item we are moving for, at the last pick-up MOVE progress check (-1 = no check yet)
+	scope.PickupMoveDistTime <- 0; // Time() of that last pick-up MOVE progress check
 	scope.DoorEnt <- null; // Used for AI_MOVE_TYPE.Door
 	scope.DoorZ <- 0; // Used for AI_MOVE_TYPE.Door
 	scope.DoorAct <- AI_DOOR_ACTION.None; // Used for AI_MOVE_TYPE.Door
@@ -215,6 +217,8 @@ enum AI_AIM_TYPE {
 	scope.PickupMoveEnt <- null; // The item we are currently trying to pick up
 	scope.PickupMoveTime <- 0; // Time() of when we started trying to pick up PickupMoveEnt (the attempt is tracked per item)
 	scope.PickupSkip <- {}; // Entity indexes -> Time() until when an item must be ignored as a pick-up (we gave up on it)
+	scope.PickupMoveDist <- -1; // Distance from the item we are moving for, at the last pick-up MOVE progress check (-1 = no check yet)
+	scope.PickupMoveDistTime <- 0; // Time() of that last pick-up MOVE progress check
 	scope.Waiting <- false;
 	scope.HurryUntil <- 0;
 	scope.UseWeapons <- {};
@@ -638,6 +642,7 @@ enum AI_AIM_TYPE {
 		ret += "- PickupMoveEnt: " + scope.PickupMoveEnt + "\n";
 		ret += "- PickupMoveTime (pick-up attempt started on): " + scope.PickupMoveTime + "\n";
 		ret += "- Num. PickupSkip (ignored for pickups till give-up cooldown): " + scope.PickupSkip.len() + "\n";
+		ret += "- PickupMoveDist (units to the item at the last MOVE progress check, -1 = none): " + scope.PickupMoveDist + " at " + scope.PickupMoveDistTime + "\n";
 		ret += "- HurryUntil: " + scope.HurryUntil + "\n";
 		ret += "- Paused: " + scope.Paused + "\n";
 		ret += "\n- Num. WeapPref (" + scope.WeapPref.len() + "): ";
@@ -679,6 +684,7 @@ enum AI_AIM_TYPE {
 		ret += "- PickupMoveEnt: " + scope.PickupMoveEnt + "\n";
 		ret += "- PickupMoveTime (pick-up attempt started on): " + scope.PickupMoveTime + "\n";
 		ret += "- Num. PickupSkip (ignored for pickups till give-up cooldown): " + scope.PickupSkip.len() + "\n";
+		ret += "- PickupMoveDist (units to the item at the last MOVE progress check, -1 = none): " + scope.PickupMoveDist + " at " + scope.PickupMoveDistTime + "\n";
 		ret += "- DoorEnt: " + scope.DoorEnt + "\n";
 		ret += "- DoorZ: " + scope.DoorZ + "\n";
 		ret += "- DoorAct: AI_DOOR_ACTION." + Left4Utils.TableKeyFromValue(getconsttable()["AI_DOOR_ACTION"], scope.DoorAct) + "\n";
@@ -1359,9 +1365,11 @@ enum AI_AIM_TYPE {
 // item takes it over: two different pick-up destinations issued at every think (two items the bot wants, or the
 // pick-up think and another think function) is what made the bots oscillate between them and get stuck
 // Returns true if we are (now) moving for the item
-::Left4Bots.AIFuncs.BotPickupMoveTo <- function (item, movetype)
+::Left4Bots.AIFuncs.BotPickupMoveTo <- function (item, movetype, reason = "pickups")
 {
-	if (!item || !item.IsValid() || !L4B.IsValidPickup(item))
+	// The item we are already moving for stays valid even if another bot just claimed it (0.2 s skip_use), we just
+	// wait it out; a *new* item has to be free
+	if (!item || !item.IsValid() || !L4B.IsValidPickup(item, MoveEnt == item))
 		return false;
 
 	if (MoveType > movetype)
@@ -1371,7 +1379,8 @@ enum AI_AIM_TYPE {
 		&& L4B.Settings.pickups_failsafe_delay > 0 && (CurTime - PickupMoveTime) < L4B.Settings.pickups_failsafe_delay)
 		return false; // Another item's pick-up attempt is still going: don't steal its MOVE
 
-	local started = MoveType != movetype || MoveEnt != item;
+	// Do we already have a MOVE going for this very item?
+	local keeping = MoveType == movetype && MoveEnt == item && MovePos != null;
 
 	MoveType = movetype;
 	MoveEnt = item;
@@ -1380,19 +1389,44 @@ enum AI_AIM_TYPE {
 	{
 		PickupMoveEnt = item;
 		PickupMoveTime = CurTime;
+		PickupMoveDist = -1;
 	}
 
-	// force = true: when we keep the same destination BotMoveTo/Nav would skip the command, but the bot's own AI
-	// wants it to follow the flow. If we don't refresh the MOVE command at every pick-up think (before
-	// sb_debug_apoproach_wait_time expires) the bot takes one step towards the item, then walks forward again
-	// and never gets to it
-	if (L4B.Settings.moveto_nav)
-		BotMoveToNav(MoveEnt.GetOrigin(), true);
-	else
-		BotMoveTo(MoveEnt.GetOrigin(), true);
+	local force = !keeping;
 
-	if (started)
-		L4B.Logger.Debug("[AI]" + self.GetPlayerName() + " - Started moving for: " + MoveEnt);
+	if (keeping)
+	{
+		// Handing the bot the same MOVE command over and over is what gets it stuck in front of the item: every
+		// MOVE_TO restarts its approach, so refreshing it ~6 times a second means it never completes it. We only
+		// re-send the command when the bot isn't getting any closer to the item (its own AI overrode our command,
+		// e.g. by following the flow), and at most once a second. BotMoveTo/Nav has its own 0.5 s throttle too,
+		// and it does send an updated destination when the item itself moved (physics items)
+		local dist = (Origin - MoveEnt.GetCenter()).Length();
+
+		if (PickupMoveDist < 0 || (PickupMoveDist - dist) >= 10) // Got at least 10 units closer: keep the command we gave
+		{
+			PickupMoveDist = dist;
+			PickupMoveDistTime = CurTime;
+		}
+		else if ((CurTime - PickupMoveDistTime) >= 1.0)
+		{
+			L4B.Logger.Debug("[AI]" + self.GetPlayerName() + " - Not getting closer to " + MoveEnt + " (" + dist.tointeger() + " units): giving the MOVE again");
+
+			PickupMoveDist = dist;
+			PickupMoveDistTime = CurTime;
+			force = true;
+		}
+	}
+
+	if (L4B.Settings.moveto_nav)
+		BotMoveToNav(MoveEnt.GetOrigin(), force);
+	else
+		BotMoveTo(MoveEnt.GetOrigin(), force);
+
+	// Logged only when the destination item actually changes: if the console shows this line alternating between
+	// two items, something is still taking the pick-up MOVE over (the reason says which of our two pick-up logics)
+	if (!keeping)
+		L4B.Logger.Debug("[AI]" + self.GetPlayerName() + " - Started moving for: " + MoveEnt + " (" + reason + ")");
 
 	return true;
 }
@@ -1414,8 +1448,17 @@ enum AI_AIM_TYPE {
 	// The item our pick-up MOVE is going to, if any. The attempt clock only runs while we own the pick-up MOVE for
 	// that exact item, so an item the bot never went after is never force-picked up
 	local chasing = null;
-	if (MoveType == pickupMovetype && L4B.IsValidPickup(MoveEnt))
+	if (MoveType == pickupMovetype && L4B.IsValidPickup(MoveEnt, true))
 		chasing = MoveEnt;
+
+	if (chasing == null)
+	{
+		// We don't own a pick-up MOVE (nothing was chosen yet, an order/defib/door took the MOVE over, the item is
+		// gone...): any previous attempt is over. Without this the clock of an interrupted attempt would still be
+		// running when we go back for the same item, and it would be force-picked up from wherever we are standing
+		PickupMoveEnt = null;
+		PickupMoveTime = 0;
+	}
 
 	local pickupAttempt = chasing != null && PickupMoveEnt == chasing ? CurTime - PickupMoveTime : 0;
 
@@ -1431,22 +1474,46 @@ enum AI_AIM_TYPE {
 
 	if (failsafeOn && chasing != null && !pickupCommitted)
 	{
-		// The attempt on the item we were chasing is over and we still don't have it: force the pick-up if we can
-		// still see it, otherwise give up. Either way the item goes on the ignore list (give-up cooldown), or we
-		// would pick the very same item as our target again on the next think
-		if (L4B.CanTraceToPickup(self, chasing))
+		// The attempt on the item we were chasing is over and we still don't have it. pickups_failsafe_delay is a
+		// stall timeout: PickupMoveDistTime only moves when the bot closed in on the item, so an item that
+		// takes a while to walk to (a detour) just gets another attempt window, while an item the bot can't reach
+		// ends up force-picked up (if visible) or given up on
+		if (!L4B.IsValidPickup(chasing))
 		{
+			// Someone is taking it right now (PickupFailsafe puts a 0.2 s "skip_use" claim on the item). That's not
+			// a reason to give up on the item nor to switch to another one, so just wait it out: keep the MOVE and
+			// start a new attempt window
+			L4B.Logger.Debug("[AI]" + self.GetPlayerName() + " - " + chasing + " is being taken by someone else: waiting for it");
+
+			PickupMoveTime = CurTime;
 			pickup = chasing;
-			pickupFailsafe = true;
+		}
+		else if (PickupMoveDist < 0 || (CurTime - PickupMoveDistTime) >= L4B.Settings.pickups_failsafe_delay)
+		{
+			// No closer than we were a full attempt window ago: this is as close as the bot gets. Force the pick-up
+			// if it can see the item, otherwise give up on it (ignore list) so it stops walking into the obstacle
+			if (L4B.CanTraceToPickup(self, chasing))
+			{
+				pickup = chasing;
+				pickupFailsafe = true;
+			}
+			else
+			{
+				L4B.Logger.Debug("[AI]" + self.GetPlayerName() + " - Gave up on " + chasing + " after " + pickupAttempt.tointeger() + "s without getting closer (can't see it anymore): resetting MOVE");
+
+				BotSkipPickup(chasing);
+				BotMoveReset();
+
+				return;
+			}
 		}
 		else
 		{
-			L4B.Logger.Debug("[AI]" + self.GetPlayerName() + " - Gave up on " + chasing + " after " + pickupAttempt.tointeger() + "s (can't see it anymore): resetting MOVE");
+			// Still getting closer to it: another attempt window, no need to pick it up from a distance
+			L4B.Logger.Debug("[AI]" + self.GetPlayerName() + " - Still walking to " + chasing + ": another " + L4B.Settings.pickups_failsafe_delay.tointeger() + "s");
 
-			BotSkipPickup(chasing);
-			BotMoveReset();
-
-			return;
+			PickupMoveTime = CurTime;
+			pickup = chasing;
 		}
 	}
 	else if (pickupCommitted)
@@ -1473,7 +1540,9 @@ enum AI_AIM_TYPE {
 	}
 
 	// Is the item close enough? (or is our pick-up attempt over and we can see the item? pickupFailsafe)
-	if (pickupFailsafe || (self.GetCenter() - pickup.GetCenter()).Length() <= L4B.Settings.pickups_pick_range || L4B.CanUseTo(self, pickup, false)) // There is a cvar (player_use_radius 96) but idk how the distance is calculated, seems not to be from the player's origin or center
+	// The strict IsValidPickup: another bot may have just claimed the item (0.2 s), we keep moving for it but we
+	// don't press USE on it while it's claimed, or two bots end up fighting over it and switching to other items
+	if (L4B.IsValidPickup(pickup) && (pickupFailsafe || (self.GetCenter() - pickup.GetCenter()).Length() <= L4B.Settings.pickups_pick_range || L4B.CanUseTo(self, pickup, false))) // There is a cvar (player_use_radius 96) but idk how the distance is calculated, seems not to be from the player's origin or center
 	{
 		// Yes, pick it up. With the failsafe, PickupFailsafe fires USE on the item directly so the distance doesn't matter
 		L4B.Logger.Debug("[AI]" + self.GetPlayerName() + " - Picking up: " + pickup + (pickupFailsafe ? " (failsafe, after " + pickupAttempt.tointeger() + "s)" : ""));
@@ -1537,18 +1606,19 @@ enum AI_AIM_TYPE {
 	if (MoveType > pickupMovetype)
 		return; // Do not move for the item if there is an ongoing MOVE with higher priority
 
-	// Don't move for the item if finale escape started or there are teammates who need help
+	// Don't move for the item if finale escape started or there are teammates who need help.
+	// BotShouldStartPause (our own pause/meds state) is only checked when we aren't committed: it toggles every few
+	// ticks, so aborting an ongoing attempt with it is another way to make the bots never reach an item
 	// if (BotIsInPause()) // TODO: Should we?
-	if (L4B.EscapeStarted || L4B.SurvivorsHeldOrIncapped() || L4B.BotShouldStartPause(self, UserId, Origin, SM_IsStuck, false, false, 0))
+	if (L4B.EscapeStarted || L4B.SurvivorsHeldOrIncapped() || (!pickupCommitted && L4B.BotShouldStartPause(self, UserId, Origin, SM_IsStuck, false, false, 0)))
 	{
 		if (MoveType == pickupMovetype)
 		{
 			L4B.Logger.Debug("[AI]" + self.GetPlayerName() + " - Teammates need help: resetting MOVE");
 
-			// Don't go back for this item right away either, or the bot would walk to it and back to the team forever
-			BotSkipPickup(pickup);
-
-			// Reset if we were moving for this item
+			// Reset if we were moving for this item. The item doesn't go on the ignore list: this condition is
+			// about the team, not about the item, and burning every item around while it lasts is what made the
+			// bots run through them one after the other without getting any of them
 			BotMoveReset();
 		}
 		return;
@@ -1584,16 +1654,21 @@ enum AI_AIM_TYPE {
 		}
 	}
 
-	if ((allBots && (NetProps.GetPropInt(self, "m_hasVisibleThreats") || Left4Bots.HasAngryCommonsWithin(Origin, 3, 400, 100))) || Left4Bots.HasVisibleSpecialInfectedWithin(self, Origin, 400) || Left4Bots.HasTanksWithin(Origin, 800) || Left4Bots.HasWitchesWithin(Origin, 300, 100)) {
+	// Special infected, tanks and witches always stop the scavenging. The "commons around me" conditions, on the
+	// other hand, are true most of the time for a bot in an all-bot game (m_hasVisibleThreats is set whenever the
+	// bot has a common in sight), so they only stop us from starting a new pick-up: dropping the MOVE with them at
+	// every think is what made the bots never commit to an item (pickups_failsafe_delay had no effect because the
+	// attempt was killed before it could ever run)
+	local dangerHard = Left4Bots.HasVisibleSpecialInfectedWithin(self, Origin, 400) || Left4Bots.HasTanksWithin(Origin, 800) || Left4Bots.HasWitchesWithin(Origin, 300, 100);
+	local dangerSoft = allBots && (NetProps.GetPropInt(self, "m_hasVisibleThreats") || Left4Bots.HasAngryCommonsWithin(Origin, 3, 400, 100));
+
+	if (dangerHard || (!pickupCommitted && dangerSoft)) {
 		if (MoveType == pickupMovetype)
 		{
 			L4B.Logger.Debug("[AI]" + self.GetPlayerName() + " - Too much danger to scavenge: resetting MOVE");
 
-			// Give up on the item for a while too: chasing it while the vanilla AI is fighting for control of the
-			// bot is another way to get stuck in place
-			BotSkipPickup(pickup);
-
-			// Reset if we were moving for this item
+			// Reset if we were moving for this item, without ignoring it: the danger is transient and we'll go back
+			// for the item as soon as it passes
 			BotMoveReset();
 		}
 		return;
@@ -1621,7 +1696,7 @@ enum AI_AIM_TYPE {
 	}
 	
 	// Start the MOVE for this item or keep the one we already have going (with its attempt clock)
-	BotPickupMoveTo(pickup, pickupMovetype);
+	BotPickupMoveTo(pickup, pickupMovetype, "scan");
 }
 
 // Handles the bot's defib logic
@@ -2175,7 +2250,7 @@ enum AI_AIM_TYPE {
 				// issuing our own MOVE here at every Misc think used to steal the MOVE of the item the pick-up logic
 				// was already chasing (and the one of a defib run, since it didn't check the MOVE priority), the two
 				// MOVES then alternating every few ticks with the bot stuck between them
-				BotPickupMoveTo(medkit, Left4Bots.Bots.len() >= Left4Bots.Survivors.len() ? AI_MOVE_TYPE.PickupHigh : AI_MOVE_TYPE.Pickup);
+				BotPickupMoveTo(medkit, Left4Bots.Bots.len() >= Left4Bots.Survivors.len() ? AI_MOVE_TYPE.PickupHigh : AI_MOVE_TYPE.Pickup, "extra medkit");
 			}
 		}
 	}
@@ -2552,6 +2627,7 @@ enum AI_AIM_TYPE {
 	// No MOVE, so the pick-up attempt (if any) is over too
 	PickupMoveEnt = null;
 	PickupMoveTime = 0;
+	PickupMoveDist = -1;
 }
 
 // Send a RESET command to the bot (if CanReset is true)

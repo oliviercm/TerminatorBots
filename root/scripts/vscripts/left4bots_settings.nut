@@ -388,12 +388,15 @@
 	// Minimum interval between each pick-up
 	pickups_min_interval = 0
 
-	// How long a bot keeps chasing a pick-up (in seconds). While the attempt is going the bot is committed to the
-	// item: it doesn't drop the pick-up MOVE because it fell behind the team or because the item is a bit back along
-	// the flow (that made the bots oscillate between the item and the flow forever). When the attempt ends, if the bot
-	// still doesn't have the item but can see it, the item is forced into its inventory via USE input. Either way
-	// the item is then ignored for pickups_giveup_cooldown seconds
-	// Set to 0 to disable both the commitment and the failsafe pick-up (the bots will give up on items behind them)
+	// How long a bot commits to a pick-up (in seconds), which is also how long it tolerates not getting any closer
+	// to the item: while the bot is walking towards it we don't hand it the same MOVE command again (restarting the
+	// approach at every think is what used to get it stuck in front of the item), we only re-send it when the bot
+	// stalls. While the attempt is going the bot is committed to that item: it doesn't drop the pick-up MOVE because
+	// it fell behind the team, because the item is a bit back along the flow or because commons are around (that
+	// made the bots flip between items and never get any of them). When the attempt ends without the bot getting
+	// closer, the item is forced into its inventory via USE input if it can see it, otherwise it is given up on
+	// (ignored for pickups_giveup_cooldown seconds)
+	// Set to 0 to disable the commitment, the stall check and the failsafe pick-up
 	pickups_failsafe_delay = 2
 
 	// How long a bot ignores an item as a pick-up (in seconds) after it stopped chasing it (the pick-up attempt
